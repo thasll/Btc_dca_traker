@@ -54,6 +54,7 @@ export default function App() {
   const [priceStatus, setPriceStatus] = useState("loading"); // "loading" | "live" | "error"
   const [lastUpdated, setLastUpdated] = useState(null);
   const [view, setView] = useState("dashboard");
+  const [confirmDelete, setConfirmDelete] = useState(null); // id to delete
 
   // Fetch real-time BTC price from CoinGecko
   const fetchPrice = useCallback(async () => {
@@ -136,7 +137,7 @@ export default function App() {
     setForm({ assetId: "1", type: "Buy", investAmount: "3000", price: "", fee: "0", date: new Date().toISOString().split("T")[0], note: "" });
   };
 
-  const delTx = id => setTransactions(transactions.filter(t => t.id !== id));
+  const delTx = id => { setConfirmDelete(null); setTransactions(transactions.filter(t => t.id !== id)); };
 
   // Running avg cost calc
   const txsSorted = [...transactions].sort((a, b) => a.date.localeCompare(b.date));
@@ -353,13 +354,28 @@ export default function App() {
                     <div style={{ fontWeight: 600 }}>{fmtInt(invest)}</div>
                     {t.fee > 0 && <div style={{ fontSize: 11, color: "#666" }}>fee {fmt(t.fee)}</div>}
                   </div>
-                  <button className="btn-del" onClick={() => delTx(t.id)}>✕</button>
+                  <button className="btn-del" onClick={() => setConfirmDelete(t.id)}>✕</button>
                 </div>
               );
             })}
           </div>
         )}
       </div>
+
+      {/* CONFIRM DELETE MODAL */}
+      {confirmDelete && (
+        <div className="overlay" onClick={() => setConfirmDelete(null)}>
+          <div className="modal" style={{ maxWidth: 340, textAlign: "center" }} onClick={e => e.stopPropagation()}>
+            <div style={{ fontSize: 36, marginBottom: 12 }}>🗑️</div>
+            <h2 style={{ fontSize: 16, fontWeight: 700, marginBottom: 8 }}>ยืนยันการลบ?</h2>
+            <p style={{ fontSize: 13, color: "#888", marginBottom: 20 }}>รายการนี้จะถูกลบถาวร ไม่สามารถกู้คืนได้</p>
+            <div style={{ display: "flex", gap: 10, justifyContent: "center" }}>
+              <button className="btn-sec" onClick={() => setConfirmDelete(null)}>ยกเลิก</button>
+              <button className="btn-primary" style={{ background: "#EF4444" }} onClick={() => delTx(confirmDelete)}>ลบเลย</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ADD MODAL */}
       {showForm && (

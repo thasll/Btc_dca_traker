@@ -1,5 +1,15 @@
 import React, { useState, useEffect, useCallback } from "react";
 
+const SUPABASE_URL = "https://jlbfwcgjijytketjpodh.supabase.co";
+const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImpsYmZ3Y2dqaWp5dGtldGpwb2RoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg3Mzk0MzksImV4cCI6MjA5NDMxNTQzOX0.Kz4JBOB-wIhYX71YsUuI4wgP-1ZornKQ2IE5n_aBBq4";
+const TABLE = `${SUPABASE_URL}/rest/v1/transactions`;
+const HEADERS = {
+  "Content-Type": "application/json",
+  "apikey": SUPABASE_KEY,
+  "Authorization": `Bearer ${SUPABASE_KEY}`,
+  "Prefer": "return=representation",
+};
+
 const ASSET_COLORS = ["#F7931A","#10B981","#F59E0B","#EF4444","#8B5CF6","#F97316","#06B6D4","#EC4899"];
 
 // BTC approximate historical closing prices (USD) based on market data
@@ -40,15 +50,8 @@ const PNL = ({ val, cls }) => (
 );
 
 export default function App() {
-  const [transactions, setTransactions] = useState(() => {
-    try {
-      const saved = localStorage.getItem("btc_transactions");
-      if (saved) return JSON.parse(saved);
-      // First time only — save initialTransactions to localStorage
-      localStorage.setItem("btc_transactions", JSON.stringify(initialTransactions));
-      return initialTransactions;
-    } catch { return initialTransactions; }
-  });
+  const [transactions, setTransactions] = useState([]);
+  const [loading, setLoading] = useState(true);
   const [assets] = useState(initialAssets);
   const [prices, setPrices] = useState(mockCurrentPrices);
   const [priceStatus, setPriceStatus] = useState("loading"); // "loading" | "live" | "error"
@@ -120,24 +123,63 @@ export default function App() {
   const totalPnlPct = totalCost > 0 ? (totalPnl / totalCost) * 100 : 0;
   const totalInvested = transactions.filter(t => t.type === "Buy").reduce((s, t) => s + t.amount * t.price + t.fee, 0);
 
-  // Save to localStorage whenever transactions change
-  useEffect(() => {
-    try { localStorage.setItem("btc_transactions", JSON.stringify(transactions)); }
-    catch { console.warn("localStorage unavailable"); }
-  }, [transactions]);
+  // Supabase: load transactions
+  const loadTx = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await fetch(`${TABLE}?order=date.asc`, { headers: HEADERS });
+      const data = await res.json();
+      if (Array.isArray(data) && data.length > 0) {
+        setTransactions(data.map(r => ({
+          id: r.id, assetId: r.asset_id, type: r.type,
+          amount: r.amount, price: r.price, fee: r.fee, date: r.date, note: r.note || ""
+        })));
+      } else {
+        // First time: seed initial data
+        await seedInitial();
+      }
+    } catch { setTransactions(initialTransactions); }
+    setLoading(false);
+  }, []);
 
-  const addTx = () => {
+  const seedInitial = async () => {
+    const rows = initialTransactions.map(t => ({
+      id: t.id, asset_id: t.assetId, type: t.type,
+      amount: t.amount, price: t.price, fee: t.fee, date: t.date, note: t.note
+    }));
+    await fetch(TABLE, { method: "POST", headers: HEADERS, body: JSON.stringify(rows) });
+    setTransactions(initialTransactions);
+  };
+
+  useEffect(() => { loadTx(); }, [loadTx]);
+
+  // Remove localStorage save effect (replaced by Supabase)
+
+  const addTx = async () => {
     const investAmt = parseFloat(form.investAmount) || 0;
     const price = parseFloat(form.price) || 0;
     const fee = parseFloat(form.fee) || 0;
     const units = price > 0 ? (investAmt - fee) / price : 0;
-    const t = { id: Date.now(), assetId: parseInt(form.assetId), type: form.type, amount: units, price, fee, date: form.date, note: form.note };
-    setTransactions([...transactions, t]);
+    const newTx = { id: Date.now(), assetId: parseInt(form.assetId), type: form.type, amount: units, price, fee, date: form.date, note: form.note };
+    // Save to Supabase
+    try {
+      await fetch(TABLE, {
+        method: "POST", headers: HEADERS,
+        body: JSON.stringify({ id: newTx.id, asset_id: newTx.assetId, type: newTx.type, amount: newTx.amount, price: newTx.price, fee: newTx.fee, date: newTx.date, note: newTx.note })
+      });
+    } catch { console.warn("Supabase save failed"); }
+    setTransactions([...transactions, newTx]);
     setShowForm(false);
     setForm({ assetId: "1", type: "Buy", investAmount: "3000", price: "", fee: "0", date: new Date().toISOString().split("T")[0], note: "" });
   };
 
-  const delTx = id => { setConfirmDelete(null); setTransactions(transactions.filter(t => t.id !== id)); };
+  const delTx = async id => {
+    setConfirmDelete(null);
+    try {
+      await fetch(`${TABLE}?id=eq.${id}`, { method: "DELETE", headers: HEADERS });
+    } catch { console.warn("Supabase delete failed"); }
+    setTransactions(transactions.filter(t => t.id !== id));
+  };
 
   // Running avg cost calc
   const txsSorted = [...transactions].sort((a, b) => a.date.localeCompare(b.date));
@@ -232,6 +274,13 @@ export default function App() {
       </div>
 
       <div style={{ maxWidth: 860, margin: "0 auto", padding: "24px 20px" }}>
+        {loading ? (
+          <div style={{ textAlign: "center", padding: "60px 0", color: "#555" }}>
+            <div style={{ fontSize: 32, marginBottom: 12 }}>⟳</div>
+            <div>กำลังโหลดข้อมูลจาก Supabase...</div>
+          </div>
+        ) : (
+          <div>
 
         {/* DASHBOARD */}
         {view === "dashboard" && holdings.length > 0 && (() => {
@@ -362,6 +411,8 @@ export default function App() {
         )}
       </div>
 
+          </div>
+        )}
       {/* CONFIRM DELETE MODAL */}
       {confirmDelete && (
         <div className="overlay" onClick={() => setConfirmDelete(null)}>

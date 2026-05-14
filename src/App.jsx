@@ -40,7 +40,15 @@ const PNL = ({ val, cls }) => (
 );
 
 export default function App() {
-  const [transactions, setTransactions] = useState(initialTransactions);
+  const [transactions, setTransactions] = useState(() => {
+    try {
+      const saved = localStorage.getItem("btc_transactions");
+      if (saved) return JSON.parse(saved);
+      // First time only — save initialTransactions to localStorage
+      localStorage.setItem("btc_transactions", JSON.stringify(initialTransactions));
+      return initialTransactions;
+    } catch { return initialTransactions; }
+  });
   const [assets] = useState(initialAssets);
   const [prices, setPrices] = useState(mockCurrentPrices);
   const [priceStatus, setPriceStatus] = useState("loading"); // "loading" | "live" | "error"
@@ -110,6 +118,12 @@ export default function App() {
   const totalPnl = totalValue - totalCost;
   const totalPnlPct = totalCost > 0 ? (totalPnl / totalCost) * 100 : 0;
   const totalInvested = transactions.filter(t => t.type === "Buy").reduce((s, t) => s + t.amount * t.price + t.fee, 0);
+
+  // Save to localStorage whenever transactions change
+  useEffect(() => {
+    try { localStorage.setItem("btc_transactions", JSON.stringify(transactions)); }
+    catch { console.warn("localStorage unavailable"); }
+  }, [transactions]);
 
   const addTx = () => {
     const investAmt = parseFloat(form.investAmount) || 0;
